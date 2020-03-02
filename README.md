@@ -6,7 +6,13 @@ A script to analyse performance test logs
 
 ## Usage
 ### List all the differences between two outputs
+Sample Input CSV format
+```
+service,entrypoint,parent,method,total,count,mean,max,testname
+foo-service,Foo.doSomething,FooParent.doSomething,Bar.execute,237110,123000,1,40,test_a
+```
 
+Command Line
 ```
 python3 loganalyser.py diff <path_to_result_timers> <path_to_another_result_timers>
 ```
@@ -18,6 +24,16 @@ python3 loganalyser.py diff "/path/to/test/result/timers_left.csv" "/path/to/tes
 
 ### Group method calls and filter by test names
 
+Sample Input CSV format
+Note different test names in the `testname` column 
+```
+service,entrypoint,parent,method,total,count,mean,max,testname
+foo-service,Foo.doSomething,FooParent.doSomething,Bar.execute,123,34,1,40,test_a
+foo-service,Foo.doSomething,FooParent.doSomething,Bar.execute,237110,54,1,40,test_b
+foo-service,Foo.doSomething,FooParent.doSomething,Bar.execute,43,23,1,44,test_a
+```
+
+Command Line
 ```
 python3 loganalyser.py group [filter] [<test_name>] <path_to_result_timers>
 ```
@@ -25,6 +41,33 @@ python3 loganalyser.py group [filter] [<test_name>] <path_to_result_timers>
 Example:
 ```
 python3 loganalyser.py group filter test_1 "/path/to/test/result/timers.csv"
+```
+
+### Analyse Hibernate Session Metrics
+Sample Session Metrics Log Entry
+```
+2020-01-23 04:43:11.915,foo-service,"2020-01-23 04:43:11.915  INFO b-10-133-5-55-0bcaac80591db0e30 --[1c7efaf4-77cb-4103-84c9-2ed2c410119b]- [sListener-0-C-1] i.StatisticalLoggingSessionEventListener : Session Metrics {
+    62656 nanoseconds spent acquiring 1 JDBC connections;
+    0 nanoseconds spent releasing 0 JDBC connections;
+    1663881 nanoseconds spent preparing 441 JDBC statements;
+    2070640259 nanoseconds spent executing 435 JDBC statements;
+    2630929996 nanoseconds spent executing 14 JDBC batches;
+    0 nanoseconds spent performing 0 L2C puts;
+    0 nanoseconds spent performing 0 L2C hits;
+    0 nanoseconds spent performing 0 L2C misses;
+    3049793928 nanoseconds spent executing 4 flushes (flushing a total of 3873 entities and 3 collections);
+    107020783 nanoseconds spent executing 4 partial-flushes (flushing a total of 866 entities and 866 collections)
+    }
+"
+```
+
+Command Line
+```
+python3 loganalyser.py hibernate <path_to_session_metrics_logs>
+```
+Example:
+```
+python3 loganalyser.py hibernate "/path/to/hibernate_session_metrics.log"
 ```
 
 ### Analyse the occurrence of a given keyword in a log file
