@@ -5,7 +5,7 @@ A script to analyse performance test logs
 # loganalyser.py
 
 ## Usage
-### List all the differences between two outputs
+### List all the differences between two performance test build results
 Sample Input CSV format
 ```
 service,entrypoint,parent,method,total,count,mean,max,testname
