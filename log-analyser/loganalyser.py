@@ -203,7 +203,8 @@ def group_method_calls(filename, str_filter=None):
         mean = float("{0:.2f}".format(
             contents[method_name]['total'] / contents[method_name][
                 'count']))
-        if contents[method_name]['total'] > 5000 and mean > 100:
+        # TODO: The below threshold can be configurable
+        if contents[method_name]['total'] > 0 and mean > 0:
             csv_reports.append(
                 "{},{},{},{},{}".format(contents[method_name]['parent'],
                                         method_name,
