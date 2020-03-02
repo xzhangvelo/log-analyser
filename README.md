@@ -103,7 +103,7 @@ https://www.npmjs.com/package/openapi-diff
 python3 openapi-diff-parser.py <path_to_openapi_diff_results>
 ```
 
-###Example:
+Example:
 ```
-openapi-diff-results.json
+python3 openapi-diff-parser.py openapi-diff-results.json
 ```
