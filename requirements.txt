@@ -1,1 +1,4 @@
 pprint
+boto3
+plotly
+pandas
