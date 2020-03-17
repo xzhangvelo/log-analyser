@@ -9,6 +9,7 @@ from pprint import pprint
 import re
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pandas as pd
 
 client = boto3.client('logs')
@@ -33,8 +34,8 @@ def get_logs(group_name):
 
     start_query_response = client.start_query(
         logGroupName=group_name,
-        startTime=int((datetime.today() - timedelta(days=3)).timestamp()),
-        endTime=int((datetime.today() - timedelta(days=2)).timestamp()),
+        startTime=int((datetime.today() - timedelta(hours=6)).timestamp()),
+        endTime=int((datetime.today()).timestamp()),
         queryString=query
     )
 
@@ -68,10 +69,29 @@ def get_logs(group_name):
 def show_graph(env_name, file_name):
     logging.info("Generating graph from {}...".format(file_name))
     data = pd.read_csv(file_name)
+    grouped_data_mean = data.groupby('Service Name').mean().reset_index()
+    pprint(grouped_data_mean)
 
-    fig = px.scatter(x=data['Service Name'], y=data['Startup time'],
-                     labels={'x': 'Service Names', 'y': 'Startup Time (seconds)'},
-                     title='Spring Microservices Startup Time Chart (Environment: {})'.format(env_name))
+    fig = make_subplots(shared_yaxes=True)
+
+    fig.add_trace(
+            go.Scatter(x=data['Service Name'], y=data['Startup time'],
+                       mode='markers',
+                       name='Startup Time (seconds)')
+        )
+
+    fig.add_trace(
+        go.Scatter(x=grouped_data_mean['Service Name'], y=grouped_data_mean['Startup time'],
+                   mode="markers",
+                   name="Startup Time Mean (seconds)")
+    )
+
+    fig.update_layout(
+        title_text='Spring Microservices Startup Time Chart (Environment: {})'.format(env_name)
+    )
+
+    fig.update_xaxes(title_text="Microservices names")
+
     fig.show()
 
 
@@ -80,7 +100,10 @@ def print_csv(env_name, data):
     for entry in data:
         csv_reports.append('{},{},{}'.format(entry['name'], entry['appStart'], entry['jvmStart']))
     pprint(csv_reports)
-    csv_file_name = "{}_{}.csv".format(env_name.replace('.', '_').replace('/', '_'), int(datetime.today().timestamp()))
+    csv_file_name = "{}_{}.csv".format(env_name.replace('.', '_')
+                                       .replace('/', '_')
+                                       .replace('-', '_'),
+                                       int(datetime.today().timestamp()))
     output_csv_file(csv_file_name, csv_reports)
     return csv_file_name
 
@@ -104,7 +127,7 @@ def main(argv):
     env_name = argv[1]
     results = get_logs(env_name)
     file_name = print_csv(env_name, results)
-    show_graph(file_name)
+    show_graph(env_name, file_name)
 
 
 main(sys.argv)
