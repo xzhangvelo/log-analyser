@@ -11,12 +11,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
+import argparse
 
 client = boto3.client('logs')
+arg_parser = argparse.ArgumentParser(description='AWS Logs Analyser')
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
-    level=logging.DEBUG,
+    level=logging.INFO,
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[logging.StreamHandler(sys.stdout)])
 
@@ -25,7 +27,7 @@ def camel_case_split(str):
     return re.findall(r'[A-Z](?:[a-z]+|[A-Z]*(?=[A-Z]|$))', str)
 
 
-def get_logs(group_name):
+def get_logs(group_name, start_time, end_time):
     query = "fields @timestamp, @logStream, @message " \
             "| filter @message like /Started/ " \
             "| parse @message \"Started * in * seconds (JVM running for *)\" as appName, appStartTime, jvmStartTime" \
@@ -34,8 +36,8 @@ def get_logs(group_name):
 
     start_query_response = client.start_query(
         logGroupName=group_name,
-        startTime=int((datetime.today() - timedelta(hours=6)).timestamp()),
-        endTime=int((datetime.today()).timestamp()),
+        startTime=int(start_time.timestamp()),
+        endTime=int(end_time.timestamp()),
         queryString=query
     )
 
@@ -75,10 +77,10 @@ def show_graph(env_name, file_name):
     fig = make_subplots(shared_yaxes=True)
 
     fig.add_trace(
-            go.Scatter(x=data['Service Name'], y=data['Startup time'],
-                       mode='markers',
-                       name='Startup Time (seconds)')
-        )
+        go.Scatter(x=data['Service Name'], y=data['Startup time'],
+                   mode='markers',
+                   name='Startup Time (seconds)')
+    )
 
     fig.add_trace(
         go.Scatter(x=grouped_data_mean['Service Name'], y=grouped_data_mean['Startup time'],
@@ -95,15 +97,18 @@ def show_graph(env_name, file_name):
     fig.show()
 
 
-def print_csv(env_name, data):
+def format_for_file_name(value):
+    return value.replace('.', '_').replace('/', '_').replace('-', '_').replace(':', '_')
+
+
+def output_data_to_csv(env_name, start_time, end_time, data):
     csv_reports = ["Service Name,Startup time,JVM Running Time"]
     for entry in data:
         csv_reports.append('{},{},{}'.format(entry['name'], entry['appStart'], entry['jvmStart']))
     pprint(csv_reports)
-    csv_file_name = "{}_{}.csv".format(env_name.replace('.', '_')
-                                       .replace('/', '_')
-                                       .replace('-', '_'),
-                                       int(datetime.today().timestamp()))
+    csv_file_name = "{}_from_{}_to_{}.csv".format(format_for_file_name(env_name),
+                                                  format_for_file_name(start_time.isoformat()),
+                                                  format_for_file_name(end_time.isoformat()))
     output_csv_file(csv_file_name, csv_reports)
     return csv_file_name
 
@@ -124,9 +129,20 @@ def print_pretty(data):
 
 
 def main(argv):
-    env_name = argv[1]
-    results = get_logs(env_name)
-    file_name = print_csv(env_name, results)
+    arg_parser.add_argument("--env", required=True, help="AWS Log Group Name")
+    arg_parser.add_argument("--start", required=True, help="Start time (ISO-8601 format)")
+    arg_parser.add_argument("--end", required=True, help="End time (ISO-8601 format)")
+    args = arg_parser.parse_args()
+
+    env_name = args.env
+    start_time = datetime.strptime(args.start, "%Y-%m-%dT%H:%M:%S")
+    end_time = datetime.strptime(args.end, "%Y-%m-%dT%H:%M:%S")
+    logging.info(
+        'Analysing logs for AWS log group {} between {} and {}'.format(env_name,
+                                                                       start_time.isoformat(),
+                                                                       end_time.isoformat()))
+    results = get_logs(env_name, start_time, end_time)
+    file_name = output_data_to_csv(env_name, start_time, end_time, results)
     show_graph(env_name, file_name)
 
 
