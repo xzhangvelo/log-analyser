@@ -129,12 +129,12 @@ def print_pretty(data):
 
 
 def main(argv):
-    arg_parser.add_argument("--env", required=True, help="AWS Log Group Name")
-    arg_parser.add_argument("--start", required=True, help="Start time (ISO-8601 format)")
-    arg_parser.add_argument("--end", required=True, help="End time (ISO-8601 format)")
+    arg_parser.add_argument("-lg", "--log_group", required=True, help="AWS Log Group Name")
+    arg_parser.add_argument("-s", "--start", required=True, help="Start time (ISO-8601 format)")
+    arg_parser.add_argument("-e", "--end", required=True, help="End time (ISO-8601 format)")
     args = arg_parser.parse_args()
 
-    env_name = args.env
+    env_name = args.log_group
     start_time = datetime.strptime(args.start, "%Y-%m-%dT%H:%M:%S")
     end_time = datetime.strptime(args.end, "%Y-%m-%dT%H:%M:%S")
     logging.info(
