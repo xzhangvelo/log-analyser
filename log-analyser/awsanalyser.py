@@ -38,7 +38,7 @@ def get_logs(query, group_name, start_time, end_time):
     query_id = start_query_response['queryId']
     response = None
     while response is None or response['status'] == 'Running':
-        print('Waiting for query to complete ...')
+        logging.info('Waiting for query to complete ...')
         time.sleep(5)
         response = client.get_query_results(
             queryId=query_id
@@ -74,10 +74,11 @@ def get_log_stream_names(group_name, service_name, start_time, end_time):
         last_event_timestamp = datetime.fromtimestamp(int(log_stream['lastEventTimestamp']) / 1000)
         first_event_timestamp = datetime.fromtimestamp(int(log_stream['firstEventTimestamp']) / 1000)
         if first_event_timestamp >= start_time and last_event_timestamp <= end_time:
-            print('{} {}'.format(first_event_timestamp, last_event_timestamp))
+            logging.debug(
+                '{} - from {} to {}'.format(log_stream['logStreamName'], first_event_timestamp, last_event_timestamp))
             log_stream_names.append(log_stream['logStreamName'])
-    pprint(log_stream_names)
-    pprint(len(log_stream_names))
+    logging.debug('Log Streams: {}'.format(log_stream_names))
+    logging.info('{} log streams are found'.format(len(log_stream_names)))
     return log_stream_names
 
 
@@ -92,70 +93,103 @@ def get_startup_logs_for_service(group_name, service_name, start_time, end_time)
         'Ensured that spring events are handled',
         'Initialized JPA',
         'Tomcat initialized',
+        'Creating filter chain'
     ]
-    for log_stream_name in log_stream_names:
-        query = "fields @timestamp, @logStream, @message " \
-                "| filter @logStream like /{}/" \
-                "| filter @message like /{}/" \
-                "| parse @message \"*  * *] *    : *\" as ts, level, prefixes, class_name, details" \
-                "| sort @timestamp desc " \
-                "| limit 100".format(log_stream_name, '|'.join(keywords))
 
-        response = get_logs(query, group_name, start_time, end_time)
+    query = "fields @timestamp, @logStream, @message " \
+            "| filter @message like /{}/" \
+            "| filter @logStream like /{}/" \
+            "| parse @message \"*  * *] *: *\" as ts, level, prefixes, class_name, details" \
+            "| sort @timestamp desc " \
+            "| limit 5000".format('|'.join(keywords), service_name)
 
-        messages = []
-        for entry in response['results']:
-            message = {}
-            for field in entry:
+    response = get_logs(query, group_name, start_time, end_time)
+
+    logging.info("Retrieved {} log entries from AWS for service {}".format(len(response['results']), service_name))
+    messages = []
+    for entry in response['results']:
+        message = {}
+        match = False
+        for field in entry:
+            if field['field'] == '@logStream':
+                ls = field['value']
+                if ls in log_stream_names:
+                    match = True
+                    message['log_stream'] = ls
+            if match:
                 if field['field'] == 'details':
                     message['message'] = field['value']
                 elif field['field'] == 'ts':
                     message['timestamp'] = field['value']
-            if message:
-                messages.append(message)
+        if 'message' in message:
+            messages.append(message)
 
-        for e in messages:
-            print(e)
-        print('----------------------------------')
-        print(len(messages))
+    logging.info('{} entries are taken into account for analysis.'.format(len(messages)))
+    return log_stream_names, messages
 
 
-def analyse_startup_stages(messages):
-    # ts = '2020-03-17 12:20:03.633'
-    ts_formatter_str = "%Y-%m-%d %H:%M:%S.%f"
-    app_start_ts = None
-    app_end_ts = None
-    flyway_start_ts = None
-    kafka_start_ts = None
-    kafka_end_ts = None
-    flyway_end_ts = None
-    hibernate_start_ts = None
-    for message in messages:
-        if 'The following profiles are active' in message['message']:
-            app_start_ts = datetime.strptime(message['timestamp'], ts_formatter_str)
-        if 'Flyway Community Edition' in message['message']:
-            flyway_start_ts = datetime.strptime(message['timestamp'], ts_formatter_str)
-        if 'HHH000412: Hibernate Core' in message['message']:
-            hibernate_start_ts = datetime.strptime(message['timestamp'], ts_formatter_str)
-        if 'Schema ' in message['message']:
-            flyway_end_ts = datetime.strptime(message['timestamp'], ts_formatter_str)
-        if 'Ensured that spring events are handled' in message['message']:
-            kafka_end_ts = datetime.strptime(message['timestamp'], ts_formatter_str)
-        if 'Producer configuration:' in message['message']:
-            kafka_start_ts = datetime.strptime(message['timestamp'], ts_formatter_str)
-        if 'Started ' in message['message']:
-            app_end_ts = datetime.strptime(message['timestamp'], ts_formatter_str)
+def analyse_startup_stages(log_stream_names, messages):
+    results = []
+    for log_stream_name in log_stream_names:
+        ls_messages = []
+        for message in messages:
+            if message['log_stream'] == log_stream_name:
+                ls_messages.append(message)
 
-    result = {}
-    if kafka_end_ts is not None and kafka_start_ts is not None:
-        result['kafka'] = kafka_end_ts - kafka_start_ts
-    if app_end_ts is not None and app_start_ts is not None:
-        result['app'] = app_end_ts - app_start_ts
-    if hibernate_start_ts is not None and flyway_start_ts is not None:
-        result['flyway'] = hibernate_start_ts - flyway_start_ts
+        logging.info("Analysing detailed timing for log stream {}".format(log_stream_name))
+        logging.debug("Messages: {}", ls_messages)
+        # ts = '2020-03-17 12:20:03.633'
+        ts_formatter_str = "%Y-%m-%d %H:%M:%S.%f"
+        app_start_ts = None
+        app_end_ts = None
+        flyway_start_ts = None
+        kafka_start_ts = None
+        kafka_end_ts = None
+        kafka_topics_end_ts = None
+        hibernate_start_ts = None
+        hibernate_end_ts = None
+        tomcat_end_ts = None
+        for ls_message in ls_messages:
+            if 'The following profiles are active' in ls_message['message']:
+                app_start_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Flyway Community Edition' in ls_message['message']:
+                flyway_start_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'HHH000412: Hibernate Core' in ls_message['message']:
+                hibernate_start_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Ensured that spring events are handled' in ls_message['message']:
+                kafka_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Producer configuration:' in ls_message['message']:
+                kafka_start_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Started ' in ls_message['message']:
+                app_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Tomcat initialized' in ls_message['message']:
+                tomcat_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Initialized JPA ' in ls_message['message']:
+                hibernate_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Creating filter chain' in ls_message['message']:
+                kafka_topics_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
 
-    print(result)
-    return result
+        result = {}
+        if kafka_end_ts is not None and kafka_start_ts is not None:
+            result['kafka'] = (kafka_end_ts - kafka_start_ts).seconds
+        if app_end_ts is not None and app_start_ts is not None:
+            result['app'] = (app_end_ts - app_start_ts).seconds
+        if hibernate_start_ts is not None and flyway_start_ts is not None:
+            result['flyway'] = (hibernate_start_ts - flyway_start_ts).seconds
+        if hibernate_start_ts is not None and hibernate_end_ts is not None:
+            result['hibernate'] = (hibernate_end_ts - hibernate_start_ts).seconds
+        if tomcat_end_ts is not None and app_start_ts is not None:
+            result['tomcat'] = (tomcat_end_ts - app_start_ts).seconds
+        if kafka_start_ts is not None and kafka_topics_end_ts is not None:
+            result['kafka_topics'] = (kafka_topics_end_ts - kafka_start_ts).seconds
+        if kafka_end_ts is not None and kafka_topics_end_ts is not None:
+            result['kafka_consumers'] = (kafka_end_ts - kafka_topics_end_ts).seconds
+
+        if result:
+            result['log_stream'] = log_stream_name
+            results.append(result)
+
+    return results
 
 
 def get_startup_time_logs(group_name, start_time, end_time):
@@ -185,7 +219,7 @@ def get_startup_time_logs(group_name, start_time, end_time):
     return results
 
 
-def show_graph(env_name, file_name):
+def show_startup_time_graph(env_name, file_name):
     logging.info("Generating graph from {}...".format(file_name))
     data = pd.read_csv(file_name).sort_values(by=['Service Name'])
     grouped_data_mean = data.groupby('Service Name').mean().reset_index().sort_values(by=['Service Name'])
@@ -214,8 +248,70 @@ def show_graph(env_name, file_name):
     fig.show()
 
 
+def show_startup_time_breakdown_graph(service_name, file_name):
+    logging.info("Generating graph from {}...".format(file_name))
+    data = pd.read_csv(file_name).sort_values(by=['Name'])
+    grouped_data_mean = data.groupby('Name').mean().reset_index().sort_values(by=['Name'])
+    pprint(grouped_data_mean)
+
+    fig = make_subplots(shared_yaxes=True)
+
+    fig.add_trace(
+        go.Scatter(x=data['Name'], y=data['Time in Seconds'],
+                   mode='markers',
+                   name='Duration')
+    )
+
+    fig.add_trace(
+        go.Scatter(x=grouped_data_mean['Name'], y=grouped_data_mean['Time in Seconds'],
+                   mode="markers",
+                   name="Duration Mean")
+    )
+
+    fig.update_layout(
+        title_text='Startup Time Detailed -- Service: {}'.format(service_name)
+    )
+
+    fig.update_xaxes(title_text="Stages")
+    fig.update_yaxes(title_text="Time in Seconds")
+
+    fig.show()
+
+
 def format_for_file_name(value):
     return value.replace('.', '_').replace('/', '_').replace('-', '_').replace(':', '_')
+
+
+def output_timings_data_to_csv(service_name, start_time, end_time, data, horizontal=False):
+    if horizontal:
+        csv_reports = ["Log Stream,App,Kafka,Flyway,Hibernate,Tomcat,Kafka Topics,Kafka Consumers"]
+        for entry in data:
+            csv_reports.append('{},{},{},{},{},{},{},{}'.format(
+                entry['log_stream'], entry['app'], entry['kafka'], entry['flyway'],
+                entry['hibernate'], entry['tomcat'], entry['kafka_topics'], entry['kafka_consumers']))
+    else:
+        csv_reports = ['Name,Time in Seconds']
+        for entry in data:
+            if 'app' in entry:
+                csv_reports.append('{},{}'.format('Overall', entry['app']))
+            if 'kafka' in entry:
+                csv_reports.append('{},{}'.format('Kafka', entry['kafka']))
+            if 'flyway' in entry:
+                csv_reports.append('{},{}'.format('Flyway', entry['flyway']))
+            if 'hibernate' in entry:
+                csv_reports.append('{},{}'.format('Hibernate', entry['hibernate']))
+            if 'tomcat' in entry:
+                csv_reports.append('{},{}'.format('Tomcat', entry['tomcat']))
+            if 'kafka_topics' in entry:
+                csv_reports.append('{},{}'.format('Kafka Topics', entry['kafka_topics']))
+            if 'kafka_consumers' in entry:
+                csv_reports.append('{},{}'.format('Kafka Consumers', entry['kafka_consumers']))
+
+    csv_file_name = "{}_timings_from_{}_to_{}.csv".format(format_for_file_name(service_name),
+                                                          format_for_file_name(start_time.isoformat()),
+                                                          format_for_file_name(end_time.isoformat()))
+    output_csv_file(csv_file_name, csv_reports)
+    return csv_file_name
 
 
 def output_data_to_csv(env_name, start_time, end_time, data):
@@ -263,11 +359,14 @@ def main(argv):
                                                                        end_time.isoformat()))
 
     if service_name is not None:
-        get_startup_logs_for_service(env_name, service_name, start_time, end_time)
+        log_stream_names, messages = get_startup_logs_for_service(env_name, service_name, start_time, end_time)
+        timings = analyse_startup_stages(log_stream_names, messages)
+        file_name = output_timings_data_to_csv(service_name, start_time, end_time, timings)
+        show_startup_time_breakdown_graph(service_name, file_name)
     else:
         results = get_startup_time_logs(env_name, start_time, end_time)
         file_name = output_data_to_csv(env_name, start_time, end_time, results)
-        show_graph(env_name, file_name)
+        show_startup_time_graph(env_name, file_name)
 
 
 main(sys.argv)
