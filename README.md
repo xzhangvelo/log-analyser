@@ -107,3 +107,47 @@ Example:
 ```
 python3 openapi-diff-parser.py openapi-diff-results.json
 ```
+
+# awsanalyser.py
+Retrieve Spring Boot startup logs and analyse time taken for different stages.
+
+## Usage
+```
+AWS Logs Analyser
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -lg LOG_GROUP, --log_group LOG_GROUP
+                        AWS Log Group Name
+  -s START, --start START
+                        Start time (ISO-8601 format)
+  -e END, --end END     End time (ISO-8601 format)
+  -svc SERVICE, --service SERVICE
+                        Service Name
+```
+
+Example 1:
+ 
+Show startup time breakdown for foo-service in bar-log-group 
+```
+python3 awsanalyser.py -lg bar-log-group -svc foo-service -s "2020-03-17T09:00:00" -e "2020-03-17T14:00:00"
+```
+
+Example 2:
+ 
+Show startup time breakdown for all services in foo-log-group 
+```
+python3 awsanalyser.py -lg foo-log-group -s "2020-03-17T09:00:00" -e "2020-03-17T14:00:00"
+```
+
+## Sampling Points
+
+| Stage Name      | Start Log Entry                   | End Log Entry                          |
+|-----------------|-----------------------------------|----------------------------------------|
+| Flyway          | Community EditionHHH000412:Flyway | Hibernate Core                         |
+| Hibernate       | HHH000412: Hibernate Core         | Initialized JPA                        |
+| Kafka Consumers | Creating filter chain             | Ensured that spring events are handled |
+| Kafka Topics    | Producer configuration:           | Creating filter chain                  |
+| Kafka           | Producer configuration:           | Ensured that spring events are handled |
+| Tomcat          | The following profiles are active | Tomcat initialized                     |
+| Overall         | The following profiles are active | Started                                |
