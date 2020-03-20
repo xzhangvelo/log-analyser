@@ -28,6 +28,7 @@ def camel_case_split(str):
 
 
 def get_logs(query, group_name, start_time, end_time):
+    logging.info('Query: [{}]'.format(query))
     start_query_response = client.start_query(
         logGroupName=group_name,
         startTime=int(start_time.timestamp()),
