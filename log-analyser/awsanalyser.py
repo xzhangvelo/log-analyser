@@ -90,11 +90,12 @@ def get_startup_logs_for_service(group_name, service_name, start_time, end_time)
         'Flyway Community Edition',
         'HHH000412: Hibernate Core',
         'Producer configuration:',
-        'Started ',
+        'JVM running for',
         'Ensured that spring events are handled',
         'Initialized JPA',
         'Tomcat initialized',
-        'Creating filter chain'
+        'Creating filter chain',
+        'Started o.s.b.w.e.j.JettyEmbeddedWebAppContext'
     ]
 
     query = "fields @timestamp, @logStream, @message " \
@@ -138,6 +139,9 @@ def analyse_startup_stages(log_stream_names, messages):
                 ls_messages.append(message)
 
         logging.info("Analysing detailed timing for log stream {}".format(log_stream_name))
+
+        for m in ls_messages:
+            print(m)
         logging.debug("Messages: {}", ls_messages)
         # ts = '2020-03-17 12:20:03.633'
         ts_formatter_str = "%Y-%m-%d %H:%M:%S.%f"
@@ -150,6 +154,7 @@ def analyse_startup_stages(log_stream_names, messages):
         hibernate_start_ts = None
         hibernate_end_ts = None
         tomcat_end_ts = None
+        jetty_end_ts = None
         for ls_message in ls_messages:
             if 'The following profiles are active' in ls_message['message']:
                 app_start_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
@@ -161,7 +166,7 @@ def analyse_startup_stages(log_stream_names, messages):
                 kafka_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
             if 'Producer configuration:' in ls_message['message']:
                 kafka_start_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
-            if 'Started ' in ls_message['message']:
+            if 'JVM running for' in ls_message['message']:
                 app_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
             if 'Tomcat initialized' in ls_message['message']:
                 tomcat_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
@@ -169,6 +174,8 @@ def analyse_startup_stages(log_stream_names, messages):
                 hibernate_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
             if 'Creating filter chain' in ls_message['message']:
                 kafka_topics_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
+            if 'Started o.s.b.w.e.j.JettyEmbeddedWebAppContext' in ls_message['message']:
+                jetty_end_ts = datetime.strptime(ls_message['timestamp'], ts_formatter_str)
 
         result = {}
         if kafka_end_ts is not None and kafka_start_ts is not None:
@@ -185,6 +192,8 @@ def analyse_startup_stages(log_stream_names, messages):
             result['kafka_topics'] = (kafka_topics_end_ts - kafka_start_ts).seconds
         if kafka_end_ts is not None and kafka_topics_end_ts is not None:
             result['kafka_consumers'] = (kafka_end_ts - kafka_topics_end_ts).seconds
+        if jetty_end_ts is not None and app_start_ts is not None:
+            result['jetty'] = (jetty_end_ts - app_start_ts).seconds
 
         if result:
             result['log_stream'] = log_stream_name
@@ -252,6 +261,13 @@ def show_startup_time_graph(env_name, file_name):
 def show_startup_time_breakdown_graph(service_name, file_name):
     logging.info("Generating graph from {}...".format(file_name))
     data = pd.read_csv(file_name).sort_values(by=['Name'])
+
+    row_count, column_count = data.shape
+    if row_count < 1:
+        logging.info("Not enough data for further processing. Total Rows: {}, Total Columns: {}".format(row_count,
+                                                                                                        column_count))
+        return
+
     grouped_data_mean = data.groupby('Name').mean().reset_index().sort_values(by=['Name'])
     pprint(grouped_data_mean)
 
@@ -285,7 +301,7 @@ def format_for_file_name(value):
 
 def output_timings_data_to_csv(service_name, start_time, end_time, data, horizontal=False):
     if horizontal:
-        csv_reports = ["Log Stream,App,Kafka,Flyway,Hibernate,Tomcat,Kafka Topics,Kafka Consumers"]
+        csv_reports = ["Log Stream,App,Kafka,Flyway,Hibernate,Tomcat,Kafka Topics,Kafka Consumers,Jetty"]
         for entry in data:
             csv_reports.append('{},{},{},{},{},{},{},{}'.format(
                 entry['log_stream'], entry['app'], entry['kafka'], entry['flyway'],
@@ -307,6 +323,8 @@ def output_timings_data_to_csv(service_name, start_time, end_time, data, horizon
                 csv_reports.append('{},{}'.format('Kafka Topics', entry['kafka_topics']))
             if 'kafka_consumers' in entry:
                 csv_reports.append('{},{}'.format('Kafka Consumers', entry['kafka_consumers']))
+            if 'jetty' in entry:
+                csv_reports.append('{},{}'.format('Jetty', entry['jetty']))
 
     csv_file_name = "{}_timings_from_{}_to_{}.csv".format(format_for_file_name(service_name),
                                                           format_for_file_name(start_time.isoformat()),
@@ -333,6 +351,7 @@ def output_csv_file(filename, lines):
         output_file.write(line)
         output_file.write('\n')
     output_file.close()
+    logging.info("{} lines are written to [{}]".format(len(lines), filename))
 
 
 def print_pretty(data):
