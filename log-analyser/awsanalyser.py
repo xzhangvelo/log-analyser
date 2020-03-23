@@ -139,9 +139,6 @@ def analyse_startup_stages(log_stream_names, messages):
                 ls_messages.append(message)
 
         logging.info("Analysing detailed timing for log stream {}".format(log_stream_name))
-
-        for m in ls_messages:
-            print(m)
         logging.debug("Messages: {}", ls_messages)
         # ts = '2020-03-17 12:20:03.633'
         ts_formatter_str = "%Y-%m-%d %H:%M:%S.%f"
